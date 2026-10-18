@@ -210,7 +210,7 @@ const KEY_SHA256 = "67e9cf521062f1bdb76cab869bbfe066004053a71546eb0b814ec968c869
 const T_LOW = 2, T_HIGH = 8, S_MIN = -4, S_MAX = 16;     // межі шкали
 
 const $ = id => document.getElementById(id);
-let hmacKey = null, client = null, lastSeq = 0, cmdSeq = (Math.floor(Date.now() / 1000) - 1700000000) * 10, history = [], demoTimer = null;
+let hmacKey = null, client = null, lastSeq = 0, lastTs = 0, cmdSeq = (Math.floor(Date.now() / 1000) - 1700000000) * 10, history = [], demoTimer = null;
 
 // ===================== Криптографія (Web Crypto) =====================
 const enc = new TextEncoder();
@@ -269,7 +269,8 @@ async function handle(kind, raw) {
 }
 
 async function sendCmd(cmd) {
-  const body = JSON.stringify({ cmd, seq: ++cmdSeq, ts: Math.floor(Date.now() / 1000) });
+  // ref — останній час пристрою з телеметрії: пристрій перевіряє, що команда «свіжа»
+  const body = JSON.stringify({ cmd, seq: ++cmdSeq, ts: Math.floor(Date.now() / 1000), ref: lastTs });
   if (demoTimer) { addLog({ type: "CMD", text: "Демо: команда " + cmd, ts: Date.now() / 1000 }); return; }
   if (!client || !client.connected) { addLog({ type: "SYSTEM", text: "Команду не надіслано: немає зв'язку", ts: Date.now() / 1000 }); return; }
   client.publish(BASE + "cmd", body + "|" + await sign(body));
@@ -291,8 +292,9 @@ const ALARM_TEXT = { TEMP_HIGH: "Температура вище норми", TE
 const MODE_TEXT = { COOLING: "Охолодження", HEATING: "Нагрів", NORMAL: "Норма" };
 
 function render(d) {
-  if (d.seq && d.seq <= lastSeq && !demoTimer) return;   // захист від повтору старих повідомлень
-  lastSeq = d.seq || lastSeq;
+  // захист від повтору: старе повідомлення має і менший номер, і не новіший час
+  if (!demoTimer && d.seq <= lastSeq && d.ts <= lastTs) return;
+  lastSeq = d.seq; lastTs = d.ts;
   const t = +d.temp;
   $("temp").textContent = (t > 0 ? "+" : "") + t.toFixed(1);
   $("mode").textContent = MODE_TEXT[d.mode] || d.mode; $("mode").className = "mode " + d.mode;
